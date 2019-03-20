@@ -1,7 +1,611 @@
-```{r}
+```{r loading database}
+load(file='movies.Rdata', verbose = T)
+```
+## Data wrangling  
+    
+We will first create some new variables that will be used later in the Bayesian modeling making use of the function `mutate` as follows:
 
+  * `feature_film`: with two levels:
+    + 'yes': if `title_type` is 'Feature Film'
+    + 'no': otherwise
+```{r feature}
+movies <- movies%>%
+        mutate(feature_film = factor(ifelse(title_type == 'Feature Film', 'yes', 'no')))
+```
+  * `drama`: with two levels:
+    + 'yes': if `genre` is 'Drama'
+    + 'no': otherwise
+```{r drama}
+movies <- movies%>%
+        mutate(drama = factor(ifelse(genre == 'Drama', 'yes', 'no')))
+```
+```{r mpaa}
+movies <- movies%>%
+        mutate(mpaa_rating_R = factor(ifelse(mpaa_rating == 'R', 'yes', 'no')))
+```
+```{r oscar}
+movies <- movies%>%
+        mutate(oscar_season = factor(ifelse(thtr_rel_month == 10|
+                                       thtr_rel_month == 11|
+                                       thtr_rel_month == 12,
+                                                            'yes', 'no')))
+```
+```{r summer}
+movies <- movies%>%
+        mutate(summer_season = factor(ifelse(thtr_rel_month == 5|
+                                       thtr_rel_month == 6|
+                                       thtr_rel_month == 7|
+                                       thtr_rel_month == 8,
+                                                            'yes', 'no')))
+```
+## Exploratory data analysis
+First of all, we will check whether `audience_score` and `imdb_rating` show a correlation between them. For doing this, we will plot both variables in a scatter plot: 
+
+```{r fig.width=5, fig.height=3}
+ggplot(movies, aes(x=audience_score, y=imdb_rating))+
+  theme_minimal()+
+  geom_point()+
+  geom_smooth(method = lm)+
+  labs(x = "Score in Rotten Tomatoes", y = "Rating in Imdb")
+   
 ```
 
-```{r}
+We can see that the plot shows a possible positive correlation between the two variables. We will confirm this by using the function `cor` to numerically calculate this correlation:
+
+```{r correlation & scatterplot}
+cor(movies$audience_score, movies$imdb_rating)
+
+plot(movies$audience_score, movies$imdb_rating, pch=20) # simple scatter plot
+abline(lm(movies$audience_score ~ movies$imdb_rating)) # regression line
+
+library(car)
+scatterplot(movies$audience_score ~ movies$imdb_rating) # enhanced scatter plot
+```
+
+```{r histo, fig.width=5, fig.height=3}
+library(ggplot2)
+
+ggplot(movies, aes(x=imdb_rating)) +  geom_histogram(fill="lightgreen", alpha = 0.7)+
+  theme_bw()+ labs(x = "Imdb rating", y= "Count", title = "Distribution of Imdb rating")
+
+ggplot(movies, aes(x=audience_score)) +  geom_histogram(fill="pink", alpha = 0.7)+
+  theme_bw()+ labs(x = "Audience score", y= "Count", title = "Distribution of RT Audience Score")
 
 ```
+```{r summary}
+library(grid)
+library(gridExtra)
+library(dplyr)
+
+grid.newpage()
+grid.table(movies%>%
+  summarise(mean = round(mean(imdb_rating), 3), 
+            sd = round(sd(imdb_rating), 3), 
+            median = median(imdb_rating), 
+            IQR = IQR(imdb_rating), 
+            min = min(imdb_rating), 
+            max = max(imdb_rating)))
+
+grid.newpage()
+grid.table(movies%>%
+  summarise(mean = round(mean(audience_score), 3), 
+            sd = round(sd(audience_score), 3), 
+            median = median(audience_score), 
+            IQR = IQR(audience_score), 
+            min = min(audience_score), 
+            max = max(audience_score)))
+```
+- Chosing imdb_rating over audience_score since the former has a relatively more normal distribution while the latter is more uniform.
+
+- Subseting the database to select on varibles of interest
+
+```{r subseting}
+movies_interesting <- movies %>%
+  select(title_type, genre, mpaa_rating, imdb_num_votes, best_pic_win, best_actor_win,
+                                                  best_actress_win, best_dir_win, imdb_rating)
+```
+#### -- Distribution of variables under consideration:
+
+We will now considered how the variables that we are interested in including in our model are distributed. For this, we will plot a histogram for each of the variables.
+
+```{r variables, fig.width=7, fig.height=7}
+g1<- ggplot(movies_interesting, aes(x=genre)) +
+  geom_bar(fill="lightblue", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "genre", y= "Count")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g2 <- ggplot(movies_interesting, aes(x=title_type)) +
+  geom_bar(fill="pink", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Type of movie", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g3 <- ggplot(movies_interesting, aes(x=mpaa_rating)) +
+  geom_bar(fill="lightgreen", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "MPAA Rating", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g4 <- ggplot(movies_interesting, aes(x=imdb_num_votes)) +
+  geom_histogram(binwidth =50000, fill="orange", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Number of votes in Imdb", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g5 <- ggplot(movies_interesting, aes(x=best_pic_win)) +
+  geom_bar(fill="yellow", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Film won an oscar", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g6 <- ggplot(movies_interesting, aes(x=best_actor_win)) +
+  geom_bar(fill="grey", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Actor won an oscar", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g7 <- ggplot(movies_interesting, aes(x=best_actress_win)) +
+  geom_bar(fill="red", alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Actress won an oscar", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+g8 <- ggplot(movies_interesting, aes(x=best_dir_win)) +
+  geom_bar(fill="blue", alpha = 0.4)+
+  theme_bw()+
+  labs(x = "Director won an oscar", y= "Count")+
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))
+
+
+grid.arrange(g2, g4, g3, g1, nrow=2, top = "Movie Characteristics")
+```
+```{r oscars, fig.height=4}
+grid.arrange(g5, g6, g7, g8, nrow =2, top = "Film or Staff involved won an Oscar")
+```
+We need to obtained summary descriptive tables. For those variables that are categorical, we can use a proportion table in order to summarise them. For this task, the `table` build-in function can be used. On the other hand, we will create a data frame with the two continous variables and apply `summary` to obtained the descriptive statistics:
+
+```{r summary}
+summary(movies_interesting$imdb_num_votes)
+table(movies_interesting$mpaa_rating)
+table(movies_interesting$title_type)
+table(movies_interesting$genre)
+table(movies_interesting$best_pic_win)
+table(movies_interesting$best_actress_win)
+table(movies_interesting$best_actor_win)
+table(movies_interesting$best_dir_win)
+```
+Because "Documentary" and "TV movies" are not likely to be displayed at Cinema theaters, we would exclude those type of movies and only include in the analysis "feature film"
+
+```{r skip doc}
+movies_interesting <- movies_interesting %>%
+            filter(title_type == "Feature Film")
+```
+
+#### -- Interaction between the variables under consideration:
+
+Now, we can analyze the interaction between our exploratory variables and the response variable. For this task, we will plot boxplot or scatter plots according to whether the exploratory variable is numerical o categorical.
+
+```{r plots, fig.width=7, fig.height=7}
+p1 <- ggplot(movies_interesting, aes(x=genre, y = imdb_rating, fill=genre))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "genre", y= "Imdb rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p2 <- ggplot(movies_interesting, aes(x=mpaa_rating, y = imdb_rating, fill=mpaa_rating))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "mpaa_rating", y= "Imdb rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p3 <- ggplot(movies_interesting, aes(x=imdb_num_votes, y = imdb_rating))+
+  geom_point(colour = "blue", alpha = 0.5)+
+  theme_bw()+
+  geom_smooth()+
+  labs(x = "Number votes", y= "Imdb rating", fill = "won_oscar")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p4 <- ggplot(movies_interesting, aes(x=best_pic_win, y = imdb_rating, fill = best_pic_win))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Film_won_Oscar", y= "Imdb rating", fill = "best_pic_win")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p5 <- ggplot(movies_interesting, aes(x=best_actress_win, y = imdb_rating, fill = best_actress_win))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Actress_won_Oscar", y= "Imdb rating", fill = "best_actress_win")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p6 <- ggplot(movies_interesting, aes(x=best_actor_win, y = imdb_rating, fill = best_actor_win))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Actor_won_Oscar", y= "Imdb rating", fill = "best_actor_win")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p7 <- ggplot(movies_interesting, aes(x=best_dir_win, y = imdb_rating, fill = best_dir_win))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Director_won_Oscar", y= "Imdb rating", fill = "best_dir_win")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+
+grid.arrange(p3, p4, p7, p5, p6, nrow = 3)
+```
+```{r staff oscar, fig.height=3}
+grid.arrange(p5, p6, nrow =1)
+```
+
+```{r summary st}
+library(plyr)
+ddply(movies_interesting,~best_dir_win,summarise,mean=mean(imdb_rating),sd=sd(imdb_rating))
+ddply(movies_interesting,~best_pic_win,summarise,mean=mean(imdb_rating),sd=sd(imdb_rating))
+
+```
+We can see also that the distribution of `imdb_num_votes` looks rigth skew. In order to adjust this, we can apply a log-transformation to the values:
+```{r log}
+movies_interesting <- movies_interesting %>% mutate(log_votes = log(imdb_num_votes))
+
+ggplot(movies, aes(x=imdb_num_votes)) +  geom_histogram(fill="lightgreen", alpha = 0.7)+
+  theme_bw()+ labs(x = "Imdb num of votes", y= "Count", title = "Distribution of Imdb num of votes")
+
+ggplot(movies_interesting, aes(x=log_votes)) +  geom_histogram(fill="green", alpha = 0.7)+
+  theme_bw()+ labs(x = "Imdb num of votes (log)", y= "Count", title = "Distribution of Imdb num of votes (log)")
+
+```
+Last, the variables `best_actor_win` and `best_actress_win` appear to have the same distribution and a similar association with `imdb_rating`, so we will combine these two variables in a new one called `main_oscar_win`.
+```{r main}
+movies_interesting <- movies_interesting%>%
+                        mutate(main_oscar_win = ifelse(best_actor_win == 'yes' | best_actress_win == 'yes', 'yes', 'no'))
+movies_interesting <- movies_interesting%>% 
+                        select(-c(best_actor_win, best_actress_win))
+
+```
+## Modeling
+### Baseline model
+Backwards elimination implies starting with a model comprising all candidates. In our case, our first full model includes all six variables. We will use `lm` for this task and include the variables `genre`, `best_pic_win`, `best_dir_win`, `main_oscar_win`, `log_votes` and `mpaa_rating`
+```{r modeling}
+fullmodel <- lm(imdb_rating ~ genre+best_pic_win+best_dir_win+main_oscar_win+log_votes+mpaa_rating, 
+          data = movies_interesting)
+summary(fullmodel)
+```
+So the variable that has the highest p-value in our model is `main_oscar_win`. 
+
+```{r step1 model}
+step1_model <- lm(imdb_rating ~ genre+best_pic_win+best_dir_win+log_votes+mpaa_rating, 
+          data = movies_interesting)
+summary(step1_model)
+```
+We can try to improve our model more by eliminating again the variable with the highest p-value. In this case, it will be `best_pic_win`. 
+```{r step2 model}
+step2_model <- lm(imdb_rating ~ genre+best_dir_win+log_votes+mpaa_rating, 
+          data = movies_interesting)
+summary(step2_model)
+```
+### Collinearity
+Variance inflation factor (VIF). It tells us how much the variance of a regression coefficient increases due to collinearity existent in the model.
+```{r collinearity}
+library(car)
+car::vif(step2_model)
+```
+1) The only numerical variable that we have in our model is `log_values`. So we can explore the first assumption by checking the residual plots (e vs. _X_).
+```{r linear relationship, fig.width=5, fig.height=3}
+library(broom)
+ggplot(augment(step2_model), aes(x = movies_interesting$log_votes, y = .resid))+
+  geom_point(colour = "red", size = 2, alpha = 0.5)+
+  theme_classic()+
+  geom_smooth(se=FALSE)+
+  labs(x = "log(number of votes)", y= "residuals")+
+  geom_hline(yintercept = 0, linetype = "dashed")
+  
+```
+The residuals are random scatter around 0, which indicates a linear relationship between the numerical exploratory variable and the response variable.
+
+2) To check this condition, we will perform first the histogram of the residuals and then a residuals Q-Q plot.
+```{r residuals normal, fig.height= 4}
+par(mfrow=c(1,2))
+hist(step2_model$residuals, main = "Residual Distribution", 
+     xlab = "Residuals", col = "lightgreen")
+qqnorm(step2_model$residuals, col = "blue")
+qqline(step2_model$residuals, col = "red")
+```
+As we can see above, the distribution histogram and the residuals Q-Q plot show a close to normal distribution, and also mimics the left-hand skew that was observed in the original `imdb rating` variable.
+
+3) Now, we need to check that the residuals are equally variable for low and high values of the predicted response variable. Then, we will check the plot of residuals vs. predicted (e vs. $\hat{y}$).
+```{r variability, fig.width=5, fig.height=3}
+ggplot(augment(step2_model), aes(x= .fitted, y= .resid))+
+  geom_point(colour = "blue", size = 2, alpha = 0.5)+
+  theme_classic()+
+  geom_smooth()+
+  geom_hline(yintercept = 0, linetype = "dashed")+
+  labs(x = "Fitted", y = "Residuals")
+```
+The residuals are randomly scattered in a band with a constant width around 0.
+
+4) Lastly, we will check for the independecy of the residuals:
+```{r independence, fig.width=5, fig.height=3}
+ggplot(augment(step2_model), aes(x = seq_along(.resid), y = .resid)) + 
+  geom_point(colour = "lightgreen", size = 2.5, alpha = 0.6)+
+  theme_classic()+
+  labs(x = "Order of Collection", y = "Residuals", title = "Residuals vs. Order of Collection")
+
+```
+The plot above does not display any particulat pattern, so it is possible to assume that the residuals and as a consequence, the observations are independant.
+
+## Prediction
+
+Now, we can test the predictive capability of the developed model using the movie:  "Zootropolis" released in 2016. The corresponding information was obtained from the IMDB website to be consistent with the analysis data. 
+
+```{r zootropolis_linar}
+zoo <- data.frame(genre="Comedy", mpaa_rating="PG", best_dir_win="yes", 
+                                  log_votes = log(345340))
+predict_1 <- predict(step2_model, zoo, interval="predict")
+
+imdb_rating_predictions <- c(8.0, 7.8)
+
+predictions <- data.frame("Movie" = "Zootropolis",
+                          "Predicted rating" = sprintf("%2.1f", predict_1[1]),
+                          "95% CI" = sprintf("%2.1f-%2.1f", predict_1[2], predict_1[3]),
+                          "IMDb rating" = imdb_rating_predictions[1])
+
+predictions
+```
+First of all, we can say that in this case the 95% confidence interval can be interpreted as the interval around the predicted rating score within which we are 95% confident the real movie rating would fall.  
+  
+From the table we can observed that the model was close in predicting the rating for Zootropolis if we considered that the real rating is inside the 95% confidence prediction interval. 
+
+* * *
+
+## SECOND PART: BAYESIAN MODELING
+
+Another way to predict movie popularity is to use a Bayesian modeling instead of a linear regression model. 
+So, we will start by selecting the variables that are interesting for this part of the project:
+
+
+
+```{r selecting}
+movies_final <- movies%>%
+                  select(feature_film, drama, runtime, mpaa_rating_R, 
+                         thtr_rel_year, oscar_season, summer_season, imdb_rating,
+                         imdb_num_votes, critics_score, best_pic_nom, best_pic_win,
+                         best_actor_win, best_actress_win, best_dir_win, top200_box)
+```
+* * *
+## Exploratory data analysis
+  
+### Relation between new exploratory and response variables:
+First of all, we will investigate which is the relationship between the response variable `imdb_rating` and the new exploratory variables created. In doing so, we will create summary statistic tables and side-by-side boxplot:
+```{r feature_plot, fig.height= 8, fig.width=8}
+p1 <- ggplot(movies_final, aes(x=feature_film, y = imdb_rating, fill=feature_film))+
+  geom_boxplot(alpha = 0.7)+
+  theme_minimal()+
+  scale_fill_brewer(palette="Set2")+
+  labs(x = "Feature Film", y= "imdb_rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p2 <- ggplot(movies_final, aes(x=drama, y = imdb_rating, fill=drama))+
+  geom_boxplot(alpha = 0.7)+
+  theme_minimal()+
+  scale_fill_brewer(palette="Set3")+
+  labs(x = "Drama", y= "imdb_rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p3<- ggplot(movies_final, aes(x=mpaa_rating_R, y = imdb_rating, fill=mpaa_rating_R))+
+  geom_boxplot(alpha = 0.7)+
+  theme_minimal()+
+  scale_fill_brewer(palette="Set1")+  
+  labs(x = "MPAA Rating R", y= "imdb_rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p4 <- ggplot(movies_final, aes(x=oscar_season, y = imdb_rating, fill=oscar_season))+
+  geom_boxplot(alpha = 0.7)+
+  theme_minimal()+
+  scale_fill_brewer(palette="Dark2")+   
+  labs(x = "Oscar season", y= "imdb_rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+p5 <- ggplot(movies_final, aes(x=summer_season, y = imdb_rating, fill=summer_season))+
+  geom_boxplot(alpha = 0.7)+
+  theme_minimal()+
+  scale_fill_brewer(palette="RdBu")+   
+  labs(x = "Summer season", y= "imdb_rating")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")
+
+
+grid.arrange(p1, p2, p3, p4, p5, nrow = 3)
+```
+#### - `feature film`
+```{r summary feature}
+library(pander)
+table_feature <- movies_final %>%
+                    tbl_df%>%
+                    group_by(feature_film)%>%
+                    dplyr::summarize(n = n(), Mean = mean(round(mean(imdb_rating), 2)), Sd = sd(imdb_rating))
+pandoc.table(table_feature)
+```
+From the table and the plots, we can observe that:  
+ * Even though there are only 60 non-feature films vs. 591 feature films, a potential relationship between `feature_film` and `imdb_rating` is present in this dataset due to the fact that non feature films appear to have an `imdb_rating` mean of 7.53 point higher than feature films. 
+ * Taking into consideration the variance of both groups, it is neccesary to use inferential tools to distinguish if this difference is statistically significant. 
+
+#### - `drama`:
+```{r summary drama}
+table_drama <- movies_final %>%
+                    tbl_df%>%
+                    group_by(drama)%>%
+                    dplyr::summarize(n = n(), Mean = mean(round(mean(imdb_rating), 2)), Sd = sd(imdb_rating))
+pandoc.table(table_drama)
+```
+From the plot and the table, we can observe the following:  
+ * There are 346 movies that belong to the category drama and 305 that do not.   
+ * Contrary to what we observed with `feature_film` variable, there is not clear relationship between `drama` and `imdb_rating` as the mean of both groups is similar. 
+
+#### - `mpaa_rating_R`:
+```{r summary rating}
+table_rating <- movies_final %>%
+                    tbl_df%>%
+                    group_by(mpaa_rating_R)%>%
+                    dplyr::summarize(n = n(), Mean = mean(round(mean(imdb_rating), 2)), Sd = sd(imdb_rating))
+pandoc.table(table_rating)
+```
+From the plot and the table, we learnt that:  
+ * The variable `mpaa_rating` shows no relationship with `imdb_rating`.  
+ * Not only we can see that half of the movies (329) belongs to the category 'R' of MPAA Rating, but also the mean of `audience_score` is equal in both groups as well as the variance.
+
+#### - `oscar_season`:
+```{r summary oscar}
+table_oscar <- movies_final %>%
+                    tbl_df%>%
+                    group_by(oscar_season)%>%
+                    dplyr::summarize(n = n(), Mean = mean(round(mean(imdb_rating), 2)), Sd = sd(imdb_rating))
+pandoc.table(table_oscar)
+```
+From the plot and the table, we observe that:  
+ * The variable `oscar_season` do not show a evident relationship with `imdb_rating`.  
+ * There is fewer movies released within Oscar season (191) that outside it (460).
+ * The mean of `imdb_rating` is similar in both groups as well as the variance.
+
+#### - `summer_season`:
+```{r summary summer}
+table_summer <- movies_final %>%
+                    tbl_df%>%
+                    group_by(summer_season)%>%
+                    dplyr::summarize(n = n(), Mean = mean(round(mean(imdb_rating), 2)), Sd = sd(imdb_rating))
+pandoc.table(table_summer)
+```
+From the plot and the table, we observe that:  
+ * The variable `summer_season` do not show a evident relationship with `audience_score`.  
+ * There is fewer movies released within summer season (208) that outside it (443).
+ * The mean of `audience_score` is similar in both groups as well as the variance.
+
+From the exploratory analysis performed, we can speculate that the new created variable `feature_film` would have the strongest relationship with our response variable `imdb_rating` while the other new variables created could have weak or no relationship.
+* * *
+
+## Modeling
+
+We will now proceed to conduct a Bayesian regression using the `BAS` package. We will use Bayesian Model Average (BMA) and Zellner-Siow Cauchy prior along with an uniform model prior to assign equal probabilities to all models. Regarding the option method, we will use "MCMC" (Markov chain Monte Carlo) that improves the  model search efficiency.
+
+Fist of all, we will discard any rows with `NAs`:
+```{r}
+movies_final <- movies_final %>%
+      filter(complete.cases(.))
+```
+The code below creates the full Bayesian model:
+```{r bayesian}
+library(BAS)
+movies_bas <- bas.lm(imdb_rating ~ .,
+                     data = movies_final,
+                     method = "MCMC",
+                     prior = "ZS-null",
+                     modelprior = uniform())
+```
+We will now print the marginal inclusion probabilities obtained for the model:
+```{r summary3}
+movies_bas
+```
+After that, we can use the function `summary`  
+```{r summarybas}
+summary(movies_bas)
+```
+to see the top 5 models with the zero-one indicators for variable inclusion. It is also displayed a column with the Bayes factor ($BF$) for each model to the highest probability model, the posterior probabilities of the models ($PostProbs$), the $R^2$ of the models, the dimension of the models ($dim$) and the log marginal likelihood ($logmarg$) under the selected prior distribution.
+
+Last, we can make use of the function `image`  
+```{r image, fig.height=6, fig.width=6}
+image(movies_bas, rotate=F)
+```
+to visualize the Log Posterior Odds and Model Rank. In the picture above, each row correspond to each variable included in the full model as well as one extra row for the intercept. In each column, we can see all possible models ($2^{16}$ because we have 16 variables included) sorted by their posterior probability from the best to worst rank on the top (from left to right). 
+
+> From the model and the image above, we can see that:  
+>    * `feature_film` has a marginal probability of 0.999, and appears in all five top models  
+>    * `critics_score` has a marginal probability of 0.999 and also appears in all five top models
+>    * `runtime` has a marginal probability of 0.98 and appears in all five top models
+>    * `drama` has a marginal probability of 0.57 and appears in three of the five top models
+>    * `imbd_num_votes` has a marginal probability of 0.99 and appears in three of the five top models 
+>    * the intercept also has a marginal probability of 1, and appears in all five top models
+    
+According to this, the best model includes the intercept, `feature_film`, `critics_score`, `drama`, `imbd_num_votes` and `runtime`
+
+#### Posterior Distributions of Coefficients
+We can now obtain the coefficients estimates and standard deviations under BMA in order to be able to examine the marginal distributions for the important variables coefficients. To do so, we will use the function `coef` and plot them using `plot`:  
+```{r coefficients}
+coef_movies <- coef(movies_bas)
+
+par(mfrow=c(3,2))
+plot(coef_movies, subset = c(1, 2, 3, 4, 9, 10), ask=F)
+```
+The vertical line corresponds to the posterior probability that the coefficient equals to 0. On the other hand, the shaped curve shows the density of posiible values where the coefficient is non-zero. It is worthy to mention that the height of the line is scaled to its probability. This implies that intercept and `feature_film`, `critics_score`, `imbd_num_votes` and `runtime` show no line denoting non-zero probability.
+
+Last, we can obtain credible intervals for coefficients using `confint` method:
+
+```{r cin}
+confint(coef_movies)
+```
+#### Graphical Summaries
+
+`BAS` package provides us with an easy way to get graphical summaries for our model just using the function `plot` and the `which` option
+
+ **Residual vs. fitted plot**
+```{r residuals, fig.height=4}
+plot(movies_bas, which = 1, ask=F)
+```
+We can observe here a plot of the "Residuals vs. Fitted values"" under BMA. Ideally, we will expect to not see outliers or non-constant variance. However, in this case we can see that there is a constant spread over the prediction but there are two outliers. 
+
+ **Model probabilities**
+```{r prob, fig.height=4}
+plot(movies_bas, which = 2, ask=F)
+```
+This plot displays the cumulative probability of the models in the order that they are sampled. This plot shows that the cumulative probability starts to level off after 300 model trials as each additional model adds only a small increment to the cumulative probability. The model search stops at ~1400 instead of enumerations of 2^15 combinations.
+
+ **Model complexity**
+```{r compl, fig.height=4}
+plot(movies_bas, which = 3, ask=F)
+```
+This plot shows the dimension of each model, that is the number of regression coefficients including the intercept versus the log of the marginal likelihood of the model. In this case, we can see that highest log marginal can be reached from 5 to 12 dimensions. 
+
+ **Marginal inclusion probabilities**
+```{r marg, fig.height=4}
+plot(movies_bas, which = 4, ask=F, cex.lab=0.5)
+```
+In this case, we can observe the marginal posterior inclusion probabilities for each of the covariates, with marginal posterior inclusion probabilities that are greater than 0.5 shown in red (important variables for explaining the data and prediction). In the graph, we can see what it was show already before about which variables contribute to the final scores.
+* * *
+
+## Prediction
+Now, we can test the predictive capability of the developed model using the movie:  "Zootropolis" released in 2016. The corresponding information was obtained from the [IMDB website](https://www.imdb.com/title/tt2948356/?ref_=nv_sr_1) and [RottenTomatoes](https://www.rottentomatoes.com/m/zootopia) to be consistent with the analysis data. 
+```{r zootropolis_bayesian}
+zootropolis <- data.frame(feature_film = "yes", drama="no", 
+                          runtime=108, mpaa_rating_R = "no", 
+                          thtr_rel_year = 2016, oscar_season = "no", 
+                          summer_season = "no", 
+                          imdb_num_votes = 345433, critics_score=98, 
+                          best_pic_nom = "yes", best_pic_win = "yes",
+                          best_actor_win = "no", best_actress_win = "no",
+                          best_dir_win = "yes", top200_box = "no")
+
+predict_1 <- predict(movies_bas, zootropolis, estimator="BMA", interval = "predict", se.fit=TRUE)
+
+data.frame('Movie' = 'Zootropolis',
+           'Estimated IMDB rating' = predict_1$Ybma, 
+           'Real IMDB rating' = 8.0)
+```
+The true `imdb_rating` is 8, which is pretty close to what our model predicted.
+* * *
+
+From the linear regression and the Bayesian model we learnt that in fact the popularity of a movie can be predicted by considering characteristic data of each movie.
+
+In the linear regression analysis, it was possible to build a parsimonious, multivariable, linear model that is able to some extend to predict the movie popularity, understood as $IMDb\ rating$, with the four statistically significant predictors chosen. However, it is important to remember that the $R_{adj}^2$ of our final model is only 0.3595, so this means that 35.95% of the variability is explained by the model. In the Bayesian model, we finally got a parsimonious model that also fullfilled the Bayesian assumptions.  
+From both models, we can see that the Bayesian model is the one which prediction was close to the real `imdb_rating`.
+
+
+
